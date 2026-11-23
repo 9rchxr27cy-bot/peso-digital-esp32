@@ -52,10 +52,39 @@ A camada de segurança é a última etapa antes do UART: nenhum modo escreve o c
 - Timeout da placa: `SERIAL_TIMEOUT 160` ≈ 0,8 s sem quadro válido → `OPEN_MODE` (torque zero) e bipes.
 - A placa aplica limitador de taxa + passa-baixa no comando (`DEFAULT_RATE 480`, `DEFAULT_FILTER 6553`), laço principal de 5 ms.
 
-Configuração que o fork ainda precisa (em `Inc/config.h`): `VARIANT_USART`, `CTRL_MOD_REQ TRQ_MODE`,
-`TANK_STEERING`, `ENABLE_ODOMETRY`, `SERIAL_TIMEOUT` menor, conferir `I_MOT_MAX 15` e baixar `N_MOT_MAX`.
+O fork ainda está sem os ajustes: aplicar `docs/fork-peso-digital.patch` (a sessão não teve acesso de
+escrita ao fork). O patch liga `VARIANT_USART`, `TRQ_MODE`, `TANK_STEERING`, `ENABLE_ODOMETRY`,
+`SERIAL_TIMEOUT 20` (0,1 s), `N_MOT_MAX 700` e troca a `FLASH_WRITE_KEY` (senão a placa reusa
+`i_max`/`n_max` antigos da flash). A placa desliga sozinha após 8 min sem comando acima de ~50
+(`INACTIVITY_TIMEOUT`); a tensão de repouso fica abaixo disso.
+
+## Código
+
+- `lib/core/`: núcleo portátil em C++17, sem Arduino. `protocol` (quadros), `modes` (fórmulas de força),
+  `safety` (teto, rampa, fim de curso, retorno rápido), `arm` (estados Idle → Homing → Ready → Active),
+  `machine` (liga placas e braços, falhas, gera os quadros). Laço de 100 Hz.
+- `lib/sim/`: placa falsa que fala os mesmos bytes, modelo do motor/carretel/mão e cenários.
+- `test/test_native/`: 18 testes; todo cenário verifica comando ≥ 0, ≤ teto e sem degrau.
+- Convenção de sinais: força e comando positivos = recolher o cabo; posição e velocidade positivas = cabo saindo.
+  Os sinais reais de cada motor ficam em `MachineConfig` (`MotorSigns`) e precisam ser conferidos no hardware.
+
+Comandos:
+
+- `pio test -e native` e `pio run -e native -t exec` (simulador, grava CSVs em `out/`).
+- Sem acesso ao registro do PlatformIO (caso das sessões na nuvem): `tools/test_local.sh`.
+- Rodar os testes depois de qualquer mudança em `lib/`.
+
+## O que o simulador já mostrou
+
+- O filtro de comando da placa atrasa tudo em ~100–150 ms: o isocinético oscila com ganho proporcional
+  acima de ~400 N·s/m (por isso usa proporcional + integral), e o zero da emergência leva ~0,2 s para chegar ao motor.
+- Pegador solto volta e bate no batente a ~1,2 m/s: o motor só puxa, não freia. Em aberto: permitir frenagem.
+- O fim de curso máximo por software não segura um usuário mais forte que o teto; a garantia das voltas mortas é mecânica.
+- Spotter não ajuda se a subida nem começa (só detecta subida que parou no meio).
+- Os parâmetros do modelo (inércia, atrito) são estimativas; calibrar com o hardware.
 
 ## Estado
 
-- Interface: a definir (Bluetooth ou Wi-Fi com página web). Começar por um console serial.
-- Firmware ainda não escrito. Antes de escrever, a arquitetura proposta precisa ser aprovada pelo dono.
+- Feito: núcleo, simulador e testes. Arquitetura aprovada pelo dono (PlatformIO, framework Arduino no ESP32).
+- Falta: ambiente `esp32s3` (UART, botão de emergência por interrupção, console serial) e depois a interface
+  (Bluetooth ou Wi-Fi com página web, a definir).
